@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "sqlite3ai"
+description = "LLM query assistant for SQLite3 databases"
+dynamic = ["version"]
+readme = "./README.md"
+dependencies = [
+  "openai",
+  "alive_progress",
+  "getch",
+  "prettytable"
+]
+requires-python = "~=3.8"
+urls = { repository = "https://github.com/mlin/sqlite3ai.git" }
+classifiers = ["License :: OSI Approved :: MIT License"]
+
+
+[project.scripts]
+sqlite3ai = "sqlite3ai:main"
+
+
+[project.optional-dependencies]
+# pip install --upgrade -e .[dev]
+dev = [
+  "setuptools",
+  "build",
+  "twine",
+  "pre-commit",
+  "black",
+  "ruff",
+]
+
+
+[tool.setuptools_scm]
+write_to = "sqlite3ai/_version.py"
+
+
+[tool.setuptools.dynamic]
+version = {attr = "sqlite3ai._version.__version__"}
+
+
+[tool.ruff]
+select = ["E", "F", "I"]
+line-length = 88

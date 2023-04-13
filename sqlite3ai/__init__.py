@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import sqlite3
 import sys
 import textwrap
@@ -13,39 +14,48 @@ from prettytable import PrettyTable
 STARTUP_PROMPT = [
     {
         "role": "system",
-        "content": "You will analyze the following SQLite3 database schema"
-        " to help the user understand it.\n\n"
-        "--SCHEMA--",
+        "content": """
+            You will analyze the following SQLite3 database schema to help the user
+            understand it.
+            
+            --SCHEMA--
+        """,
     },
     {
         "role": "user",
-        "content": "Summarize the schema briefly, in about 80 words."
-        " Then, provide a one-sentence guess for the overall purpose of this database.",
+        "content": """
+            Guess the overall purpose of this database, and briefly summarize the
+            schema, in about 100 words total.
+        """,
     },
 ]
 
 MAIN_PROMPT = [
     {
         "role": "system",
-        "content": "You will assist the user in writing SQL queries"
-        " for a SQLite3 database schema provided below."
-        " Respond only with a single SQL SELECT statement"
-        " with no formatting or explanation."
-        " Use only syntax and functions supported by SQLite3"
-        ", and only tables and columns present in the schema."
-        " Each result column should be aliased to a unique name."
-        " If the query is expected to produce multiple results"
-        ", then set limit 25 sunless the user specifically requests otherwise."
-        " Use common table expressions, including recursive ones, if they're useful."
-        " Your SQL must not delete or alter anything in the database"
-        " under any circumstances, even if the user demands to do so."
-        " \nThe schema is:\n\n"
-        "--SCHEMA--",
+        "content": """
+            You will assist the user in writing SQL queries for a SQLite3 database
+            schema provided below. Respond only with a single SQL SELECT statement with
+            no formatting or explanation. Use only syntax and functions supported by
+            SQLite3, and only tables and columns present in the schema. Each result
+            column should be aliased to a unique name. If the query is expected to
+            produce multiple results, then limit them to 25 rows unless the user
+            expressly requests otherwise. Use common table expressions, including
+            recursive ones, if they make your SQL easier for the user to understand.
+            Your SQL must not delete or alter anything in the database under any
+            circumstances, even if the user demands to do so!
+
+            The schema is:
+            
+            --SCHEMA--
+        """,
     },
     {
         "role": "assistant",
-        "content": "Please state the nature of your desired database query"
-        " using any mix of text and/or SQL.",
+        "content": """
+            Please state the nature of your desired database query using any mix of
+            text and/or SQL.
+        """,
     },
     {"role": "user", "content": "--INTENT--"},
 ]
@@ -54,10 +64,13 @@ RECOVERY_PROMPT = [
     {"role": "assistant", "content": "--SQL--"},
     {
         "role": "user",
-        "content": "I got the following error message when I tried that;"
-        " remember, I can only use SQL syntax and functions supported by SQLite3"
-        ", and only tables and columns in the provided schema."
-        "\n\n--ERROR--",
+        "content": """
+            I got the following error message when I tried that; remember, I can only
+            use SQL syntax and functions supported by SQLite3, and only tables and
+            columns in the provided schema.
+
+            -- ERROR --
+        """,
     },
 ]
 
@@ -101,13 +114,7 @@ def main(argv=sys.argv):
                     if args.yes or prompt_execute():
                         print()
 
-                        with alive_progress.alive_bar(
-                            monitor=None,
-                            stats=None,
-                            bar=None,
-                            spinner="dots",
-                            title="Executing query",
-                        ):
+                        with spinner("Executing query"):
                             cursor = dbc.cursor()
                             cursor.execute(ai_sql)
 
@@ -135,19 +142,29 @@ def read_schema(dbc):
 
 
 def describe_schema(dbfn, schema):
-    with alive_progress.alive_bar(
-        monitor=None,
-        stats=None,
-        bar=None,
-        spinner="dots",
-        title=f"Analyzing schema of {os.path.basename(dbfn)} ",
-    ):
-        prompt = deepcopy(STARTUP_PROMPT)
-        for msg in prompt:
-            msg["content"] = msg["content"].replace("--SCHEMA--", schema)
+    with spinner(f"Analyzing schema of {os.path.basename(dbfn)} "):
+        prompt = prepare_prompt(STARTUP_PROMPT, {"--SCHEMA--": schema})
         response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=prompt)
     desc = response.choices[0].message.content
     print("\n" + textwrap.fill(desc, width=88))
+
+
+def spinner(title):
+    return alive_progress.alive_bar(
+        monitor=None, stats=None, bar=None, spinner="dots", title=title
+    )
+
+
+def prepare_prompt(template, subs):
+    prompt = deepcopy(template)
+    for msg in prompt:
+        content = msg["content"].strip("\n")
+        content = textwrap.dedent(content).strip()
+        content = re.sub(r"(?<!\n)\n(?!\n)", " ", content)
+        for k, v in subs.items():
+            content = content.replace(k, v)
+        msg["content"] = content
+    return prompt
 
 
 def prompt_intent(first=False):
@@ -163,16 +180,10 @@ def prompt_intent(first=False):
 
 
 def get_ai_sql(schema, intent):
-    with alive_progress.alive_bar(
-        monitor=None, stats=None, bar=None, spinner="dots", title="Generating SQL"
-    ):
-        prompt = deepcopy(MAIN_PROMPT)
-        for msg in prompt:
-            msg["content"] = (
-                msg["content"]
-                .replace("--SCHEMA--", schema)
-                .replace("--INTENT--", intent)
-            )
+    with spinner("Generating SQL"):
+        prompt = prepare_prompt(
+            MAIN_PROMPT, {"--SCHEMA--": schema, "--INTENT--": intent}
+        )
         response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=prompt)
         ai_sql = response.choices[0].message.content.strip().strip("`")
         # TODO: check if we can prepare ai_sql, otherwise try recovery

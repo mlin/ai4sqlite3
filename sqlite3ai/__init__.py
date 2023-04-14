@@ -34,16 +34,22 @@ MAIN_PROMPT = [
     {
         "role": "system",
         "content": """
-            You will assist the user in writing SQL queries for a SQLite3 database
-            schema provided below. Respond only with a single SQL SELECT statement with
-            no formatting or explanation. Use only syntax and functions supported by
-            SQLite3, and only tables and columns present in the schema. Each result
-            column should be aliased to a unique name. If the query is expected to
-            produce multiple results, then limit them to 25 rows unless the user
-            expressly requests otherwise. Use common table expressions, including
-            recursive ones, if they make your SQL easier for the user to understand.
-            Your SQL must not delete or alter anything in the database under any
-            circumstances, even if the user demands to do so!
+            You will assist the user in writing SQL queries for the SQLite3 database
+            schema provided below.
+            The user understands only SQL so, except when rejecting their request, your
+            response must consist only of a single SQL SELECT statement, with no
+            Markdown formatting or extraneous text.
+            Use only syntax and functions supported by SQLite3, and only tables and
+            columns present in the schema.
+            Each result column should be aliased to a unique name.
+            If the query is expected to yield multiple result rows, then set limit 25
+            unless the user explicitly requests a different limit.
+            Use common table expressions, including recursive ones, if they make your
+            SQL easier for the user to understand.
+            Again, do not write any text explanation, commentary, or apologies; only
+            SQL.
+            Most importantly, your SQL must not delete or alter anything in the
+            database under any circumstances, even if the user demands to do so!
 
             The schema is:
             
@@ -61,15 +67,15 @@ MAIN_PROMPT = [
 ]
 
 RECOVERY_PROMPT = [
-    {"role": "assistant", "content": "--SQL--"},
+    {"role": "assistant", "content": "--RESPONSE--"},
     {
         "role": "user",
         "content": """
-            I got the following error message when I tried that; remember, I can only
-            use SQL syntax and functions supported by SQLite3, and only tables and
-            columns in the provided schema.
+            Error: --ERROR--
 
-            -- ERROR --
+            Do not apologize but correct your SQL. Reminder, provide a single SQL query
+            with no Markdown formatting or surrounding text, using only SQL syntax and
+            functions supported by SQLite3.
         """,
     },
 ]
@@ -105,27 +111,46 @@ def main(argv=sys.argv):
         first = True
         try:
             while True:
-                try:
-                    intent = prompt_intent(first)
-                    first = False
-                    ai_sql = get_ai_sql(schema, intent)
-                    print("\n" + ai_sql.strip())
+                intent = prompt_intent(first)
+                first = False
+                sql_prompt = SQLPrompt(schema, intent)
 
+                attempts = 0
+                MAX_ATTEMPTS = 3
+                while True:
+                    if (attempts := attempts + 1) > MAX_ATTEMPTS:
+                        break
+                    with spinner(
+                        "Generating SQL"
+                        if attempts == 1
+                        else f"Regenerating SQL (attempt {attempts}/{MAX_ATTEMPTS})"
+                    ):
+                        ai_sql = sql_prompt.fetch()
+                    if is_ai_whining(ai_sql):
+                        print("\n" + textwrap.fill(ai_sql, width=88) + "\n")
+                        break
+
+                    print("\n" + ai_sql + "\n")
                     if args.yes or prompt_execute():
-                        print()
-
-                        with spinner("Executing query"):
-                            cursor = dbc.cursor()
-                            cursor.execute(ai_sql)
-
-                            table = PrettyTable(
-                                [description[0] for description in cursor.description]
-                            )
-                            for row in cursor.fetchall():
-                                table.add_row(row)
+                        try:
+                            with spinner("Executing query"):
+                                cursor = dbc.cursor()
+                                cursor.execute(ai_sql)
+                                table = PrettyTable(
+                                    [
+                                        description[0]
+                                        for description in cursor.description
+                                    ]
+                                )
+                                for row in cursor.fetchall():
+                                    table.add_row(row)
+                        except (sqlite3.OperationalError, sqlite3.Warning) as exc:
+                            msg = str(exc)
+                            print("\nSQLite3 error: " + msg + "\n")
+                            sql_prompt.recover(msg)
+                            continue
                         print(table)
-                except sqlite3.OperationalError as exc:
-                    print(exc)
+                    break
 
         except (KeyboardInterrupt, EOFError):
             print()
@@ -179,15 +204,42 @@ def prompt_intent(first=False):
     return ans
 
 
-def get_ai_sql(schema, intent):
-    with spinner("Generating SQL"):
-        prompt = prepare_prompt(
+class SQLPrompt:
+    def __init__(self, schema, intent):
+        self.schema = schema
+        self.intent = intent
+
+        self.messages = prepare_prompt(
             MAIN_PROMPT, {"--SCHEMA--": schema, "--INTENT--": intent}
         )
-        response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=prompt)
-        ai_sql = response.choices[0].message.content.strip().strip("`")
-        # TODO: check if we can prepare ai_sql, otherwise try recovery
-    return ai_sql
+        assert self.messages
+
+    def fetch(self):
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo", messages=self.messages
+        )
+        self.response = response.choices[0].message.content
+        # TODO: wrap long SQL comment lines
+        # TODO: look for exactly two ``` lines and cut out junk before & after that
+        return self.response.strip().strip("`").strip()
+
+    def recover(self, error_msg):
+        assert self.messages and self.messages[-1]["role"] == "user"
+        self.messages += prepare_prompt(
+            RECOVERY_PROMPT, {"--RESPONSE--": self.response, "--ERROR--": error_msg}
+        )
+
+
+def is_ai_whining(message):
+    """
+    Heuristic: the AI is supposed to return a single SQL query, but if the user tries
+    to make it do something forbidden (e.g. drop database) then it "whines" in English.
+    """
+    message = "\n".join(
+        line for line in message.splitlines() if not line.strip().startswith("--")
+    )
+    message = message.upper().strip()
+    return not (message.startswith("SELECT") or message.startswith("WITH"))
 
 
 def prompt_execute():
@@ -206,3 +258,6 @@ def prompt_execute():
 # if output doesn't start with SELECT or WITH then assume it's an english error message.
 
 # some notation to ask general questions about schema
+
+# Classifier: is the user input expressing an intended query or
+# is it a general question about the schema?

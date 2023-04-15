@@ -41,12 +41,12 @@ MAIN_PROMPT = [
             You will assist the user in writing an SQL query for a specific SQLite3
             database schema.
             Your answers will be directly input to sqlite3_prepare_v2(), so must
-            consist of SQL with no surrounding text or Markdown formatting, using only
-            syntax and functions supported by SQLite3,
+            consist of SQL with no surrounding text, using only syntax and functions
+            supported by SQLite3.
             If you cannot fulfill the user's intention for any reason, then provide a
             brief text explanation, without apology or other extraneous chatter.
-            Importantly, your SQL must never alter or delete anything in the database,
-            even if the user so demands.
+            Importantly, your SQL must never add, overwrite, alter, or delete anything
+            in the database, even if the user so demands.
         """,
     },
     {
@@ -54,18 +54,20 @@ MAIN_PROMPT = [
         "content": """
             Assist me writing an SQL query for my SQLite3 database.
             I will input your responses directly into SQLite3, so I require each
-            response to consist of one SQL query, with no surrounding text or Markdown
-            formatting, using only syntax and functions supported by SQLite3.
+            response to consist of one SQL query, with no surrounding text, using only
+            syntax and functions supported by SQLite3.
             If a query is expected to yield multiple result rows, then set limit 25
             unless I clearly request otherwise.
-            You may include short SQL inline comment lines starting with -- but only to
-            give me brief hints about tricky or unusual parts.
-            You may use common table expressions if required or to make the SQL much
-            easier for me to understand.
+            You may include short SQL inline comment lines starting with -- to give me
+            brief hints, but only about tricky or unusual parts.
+            You may use common table expressions if they make the SQL much easier for
+            me to understand.
             Due to the risk of infinite loop, don't use a recursive CTE unless
             absolutely required to fulfill my intent.
-            I only want to query my database; if my input seems to suggest altering or
-            deleting anything, then you must reject it.
+            I only want to query my database; if my input seems to suggest adding,
+            altering, overwriting, or deleting anything, then you must reject it.
+            If you're confident my input is a general question rather than a specific
+            database query, then do provide a brief text answer.
 
             My schema is:
 
@@ -92,9 +94,9 @@ REVISE_PROMPT = [
         "content": """
             Revise your SQL to fix this error: --ERROR--
 
-            Output format: one SQL query with no surrounding text or Markdown
-            formatting, using only SQL syntax and functions supported by SQLite3.
-            No apology or other extraneous chatter.
+            Output format: one SQL query with no surrounding text, using only SQL
+            syntax and functions supported by SQLite3.
+            Do not apologize or add any other extraneous chatter.
         """,
     },
 ]
@@ -171,6 +173,7 @@ def main_repl(model, dbc, schema, yes=False, max_revisions=3):
             while True:
                 if (attempts := attempts + 1) > max_revisions:
                     break
+                print()
                 with spinner(
                     "Generating SQL"
                     if attempts == 1
@@ -178,9 +181,8 @@ def main_repl(model, dbc, schema, yes=False, max_revisions=3):
                 ):
                     # generate AI SQL
                     ai_sql = sql_prompt.fetch()
-                if is_ai_refusal(ai_sql):
-                    # AI refused user intent
-                    print("\n" + textwrap.fill(ai_sql, width=88) + "\n")
+                if is_text_answer(ai_sql):
+                    print("\n" + textwrap.fill(ai_sql, width=88))
                     break
 
                 print("\n" + ai_sql + "\n")
@@ -278,15 +280,14 @@ class SQLPrompt:
         response = openai.ChatCompletion.create(
             model=self.model, messages=self.messages
         )
-        self.response = response.choices[0].message.content
-        # the AI sometimes puts its SQL inside a markdown ```code block``` with chatter
-        # before and/or after (contrary to our repeated instructions)
-        lines = self.response.splitlines()
-        ticks = [i for i, line in enumerate(lines) if line.strip() == "```"]
-        if len(ticks) != 2 or ticks[1] - ticks[0] <= 1:
-            return self.response.strip()
-        lines = lines[(ticks[0] + 1) : ticks[1]]
-        return "\n".join(lines).strip()
+        self.response = response.choices[0].message.content.strip()
+        # recover a couple of cases where the AI puts junk before/after the SQL,
+        # contrary to repeated instructions!
+        if sql := extract_md_code_block(self.response):
+            return sql
+        if sql := extract_sql_with_preamble(self.response):
+            return sql
+        return self.response
 
     def revise(self, error_msg):
         # prepare prompt to revise the previous response given error_msg.
@@ -299,11 +300,31 @@ class SQLPrompt:
         )
 
 
-def is_ai_refusal(message):
-    # heuristic: detect a plain-English response from the AI, contrary to the
-    # instruction for SQL only.
-    # it mainly does this when refusing the user request to do something forbidden
-    # (e.g. drop database)
+def extract_md_code_block(text):
+    try:
+        p1 = text.index("```")
+        p2 = text.rindex("```")
+        if p2 <= p1 + 3:
+            return None
+        return text[(p1 + 3) : p2].strip()
+    except ValueError:
+        return None
+
+
+def extract_sql_with_preamble(text):
+    try:
+        text = text[(text.index(":") + 1) :].lstrip()
+        if text.upper().startswith("SELECT") or text.upper().startswith("WITH"):
+            return text.strip()
+        return None
+    except ValueError:
+        return None
+
+
+def is_text_answer(message):
+    # heuristic: detect a plain-English response from the AI, which it may provide in
+    # refusing an inappropriate request, or if the user clearly asked a general
+    # question.
     message = "\n".join(
         line for line in message.splitlines() if not line.strip().startswith("--")
     )

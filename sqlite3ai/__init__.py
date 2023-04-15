@@ -25,57 +25,75 @@ STARTUP_PROMPT = [
         "role": "user",
         "content": """
             Guess the overall purpose of this database, and briefly summarize the
-            schema, in about 100 words total.
+            tables and their relationships, in about 100 words total.
         """,
     },
 ]
 
 MAIN_PROMPT = [
+    # NOTE: per https://platform.openai.com/docs/guides/chat/introduction gpt-3.5-turbo
+    # doesn't pay enough attention to directives in the system message, so we put more
+    # into the first user message.
     {
         "role": "system",
         "content": """
-            You will assist the user in writing SQL queries for the SQLite3 database
-            schema provided below.
-            The user understands only SQL so, except when rejecting their request, your
-            response must consist only of a single SQL SELECT statement, with no
-            Markdown formatting or extraneous text.
-            Use only syntax and functions supported by SQLite3, and only tables and
-            columns present in the schema.
-            Each result column should be aliased to a unique name.
-            If the query is expected to yield multiple result rows, then set limit 25
-            unless the user explicitly requests a different limit.
-            Use common table expressions, including recursive ones, if they make your
-            SQL easier for the user to understand.
-            Again, do not write any text explanation, commentary, or apologies; only
-            SQL.
-            Most importantly, your SQL must not delete or alter anything in the
-            database under any circumstances, even if the user demands to do so!
+            You will assist the user in writing an SQL query for a specific SQLite3
+            database schema.
+            Your answers will be directly input to sqlite3_prepare_v2(), so must
+            consist of SQL with no surrounding text or Markdown formatting, using only
+            syntax and functions supported by SQLite3,
+            If you cannot fulfill the user's intention for any reason, then provide a
+            brief text explanation, without apology or other extraneous chatter.
+            Importantly, your SQL must never alter or delete anything in the database,
+            even if the user so demands.
+        """,
+    },
+    {
+        "role": "user",
+        "content": """
+            Assist me writing an SQL query for my SQLite3 database.
+            I will input your responses directly into SQLite3, so I require each
+            response to consist of one SQL query, with no surrounding text or Markdown
+            formatting, using only syntax and functions supported by SQLite3.
+            If a query is expected to yield multiple result rows, then set limit 25
+            unless I clearly request otherwise.
+            You may include short SQL inline comment lines starting with -- but only to
+            give me brief hints about tricky or unusual parts.
+            You may use common table expressions if required or to make the SQL much
+            easier for me to understand.
+            Due to the risk of infinite loop, don't use a recursive CTE unless
+            absolutely required to fulfill my intent.
+            I only want to query my database; if my input seems to suggest altering or
+            deleting anything, then you must reject it.
 
-            The schema is:
-            
+            My schema is:
+
             --SCHEMA--
         """,
     },
     {
         "role": "assistant",
         "content": """
-            Please state the nature of your desired database query using any mix of
-            text and/or SQL.
+            Schema acknowledged. Please state the nature of your intended database
+            query, using any mix of text and/or SQL.
         """,
     },
-    {"role": "user", "content": "--INTENT--"},
+    {
+        "role": "user",
+        "content": "--INTENT--",
+    },
 ]
 
-RECOVERY_PROMPT = [
+REVISE_PROMPT = [
     {"role": "assistant", "content": "--RESPONSE--"},
     {
         "role": "user",
         "content": """
-            Error: --ERROR--
+            Revise your SQL to fix this error: --ERROR--
 
-            Do not apologize but correct your SQL. Reminder, provide a single SQL query
-            with no Markdown formatting or surrounding text, using only SQL syntax and
-            functions supported by SQLite3.
+            Output format: one SQL query with no surrounding text or Markdown
+            formatting, using only SQL syntax and functions supported by SQLite3.
+            No apology or other extraneous chatter.
         """,
     },
 ]
@@ -102,59 +120,92 @@ def main(argv=sys.argv):
         action="store_true",
         help="Skip confirmation before executing AI's SQL",
     )
+    parser.add_argument(
+        "-m",
+        "--model",
+        type=str,
+        default="gpt-3.5-turbo",
+        help="OpenAI /v1/chat/completions model; see "
+        "https://platform.openai.com/docs/models/model-endpoint-compatibility",
+    )
+    parser.add_argument(
+        "-r",
+        "--revisions",
+        type=int,
+        default=3,
+        metavar="N",
+        help="allow AI up to N attempts to produce valid SQL",
+    )
     args = parser.parse_args(argv[1:])
 
+    # open database (read-only)
     with sqlite3.connect(f"file:{args.dbfn}?mode=ro", uri=True) as dbc:
+        # read & describe schema
         schema = read_schema(dbc)
-        describe_schema(args.dbfn, schema)
+        describe_schema(args.model, args.dbfn, schema)
 
-        first = True
-        try:
+        # enter main REPL
+        return main_repl(
+            args.model, dbc, schema, yes=args.yes, max_revisions=args.revisions
+        )
+
+
+def main_repl(model, dbc, schema, yes=False, max_revisions=3):
+    # main REPL for separate queries until Ctrl+C/Ctrl+D
+    first = True
+    try:
+        while True:
+            # get user intent
+            intent = user_intent(first)
+            first = False
+
+            # prepare to prompt AI for SQL
+            sql_prompt = SQLPrompt(model, schema, intent)
+
+            # generate AI SQL, run it and show result table to user.
+            # inner loop: if SQLite rejects the SQL, feed the error message back to AI
+            # and ask it to revise, then retry (subject to max_revisions)
+            attempts = 0
             while True:
-                intent = prompt_intent(first)
-                first = False
-                sql_prompt = SQLPrompt(schema, intent)
-
-                attempts = 0
-                MAX_ATTEMPTS = 3
-                while True:
-                    if (attempts := attempts + 1) > MAX_ATTEMPTS:
-                        break
-                    with spinner(
-                        "Generating SQL"
-                        if attempts == 1
-                        else f"Regenerating SQL (attempt {attempts}/{MAX_ATTEMPTS})"
-                    ):
-                        ai_sql = sql_prompt.fetch()
-                    if is_ai_whining(ai_sql):
-                        print("\n" + textwrap.fill(ai_sql, width=88) + "\n")
-                        break
-
-                    print("\n" + ai_sql + "\n")
-                    if args.yes or prompt_execute():
-                        try:
-                            with spinner("Executing query"):
-                                cursor = dbc.cursor()
-                                cursor.execute(ai_sql)
-                                table = PrettyTable(
-                                    [
-                                        description[0]
-                                        for description in cursor.description
-                                    ]
-                                )
-                                for row in cursor.fetchall():
-                                    table.add_row(row)
-                        except (sqlite3.OperationalError, sqlite3.Warning) as exc:
-                            msg = str(exc)
-                            print("\nSQLite3 error: " + msg + "\n")
-                            sql_prompt.recover(msg)
-                            continue
-                        print(table)
+                if (attempts := attempts + 1) > max_revisions:
+                    break
+                with spinner(
+                    "Generating SQL"
+                    if attempts == 1
+                    else f"Regenerating SQL (attempt {attempts}/{max_revisions})"
+                ):
+                    # generate AI SQL
+                    ai_sql = sql_prompt.fetch()
+                if is_ai_refusal(ai_sql):
+                    # AI refused user intent
+                    print("\n" + textwrap.fill(ai_sql, width=88) + "\n")
                     break
 
-        except (KeyboardInterrupt, EOFError):
-            print()
-            return 0
+                print("\n" + ai_sql + "\n")
+                if yes or prompt_execute():
+                    try:
+                        with spinner("Executing query"):
+                            # Execute query & populate results table
+                            cursor = dbc.cursor()
+                            cursor.execute(ai_sql)
+                            table = PrettyTable(
+                                [description[0] for description in cursor.description]
+                            )
+                            for row in cursor.fetchall():
+                                table.add_row(row)
+                    except (sqlite3.OperationalError, sqlite3.Warning) as exc:
+                        # feed error back to AI for revision
+                        msg = str(exc)
+                        print("\nSQLite3 error: " + msg + "\n")
+                        sql_prompt.revise(msg)
+                        continue  # inner loop
+                    # Show results table
+                    print(table)
+                break  # inner loop
+    except (KeyboardInterrupt, EOFError):
+        # exiting main REPL
+        print()
+        return 0
 
 
 def read_schema(dbc):
@@ -166,10 +217,11 @@ def read_schema(dbc):
     )
 
 
-def describe_schema(dbfn, schema):
+def describe_schema(model, dbfn, schema):
+    # ask AI to summarize the schema, display it to user
     with spinner(f"Analyzing schema of {os.path.basename(dbfn)} "):
         prompt = prepare_prompt(STARTUP_PROMPT, {"--SCHEMA--": schema})
-        response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=prompt)
+        response = openai.ChatCompletion.create(model=model, messages=prompt)
     desc = response.choices[0].message.content
     print("\n" + textwrap.fill(desc, width=88))
 
@@ -181,6 +233,8 @@ def spinner(title):
 
 
 def prepare_prompt(template, subs):
+    # preprocess the prompt constants: remove indentation, unwrap text, substitute
+    # placeholders
     prompt = deepcopy(template)
     for msg in prompt:
         content = msg["content"].strip("\n")
@@ -192,7 +246,8 @@ def prepare_prompt(template, subs):
     return prompt
 
 
-def prompt_intent(first=False):
+def user_intent(first=False):
+    # ask user for their query intent
     prompt = (
         "Next query?"
         if not first
@@ -205,7 +260,10 @@ def prompt_intent(first=False):
 
 
 class SQLPrompt:
-    def __init__(self, schema, intent):
+    # Manages our AI prompt for SQL given the user intent, including revisions after
+    # receiving invalid/erroneous SQL back.
+    def __init__(self, model, schema, intent):
+        self.model = model
         self.schema = schema
         self.intent = intent
 
@@ -216,25 +274,34 @@ class SQLPrompt:
 
     def fetch(self):
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo", messages=self.messages
+            model=self.model, messages=self.messages
         )
         self.response = response.choices[0].message.content
-        # TODO: wrap long SQL comment lines
-        # TODO: look for exactly two ``` lines and cut out junk before & after that
-        return self.response.strip().strip("`").strip()
+        # the AI sometimes puts its SQL inside a markdown ```code block``` with chatter
+        # before and/or after (contrary to our repeated instructions)
+        lines = self.response.splitlines()
+        ticks = [i for i, line in enumerate(lines) if line.strip() == "```"]
+        if len(ticks) != 2 or ticks[1] - ticks[0] <= 1:
+            return self.response.strip()
+        lines = lines[(ticks[0] + 1) : ticks[1]]
+        return "\n".join(lines).strip()
 
-    def recover(self, error_msg):
+    def revise(self, error_msg):
+        # prepare prompt to revise the previous response given error_msg.
+        # to test this path, try entering:
+        #   an interesting query of your choice. on your first response, deliberately
+        #   introduce an error in your SQL. then I'll ask you to fix it.
         assert self.messages and self.messages[-1]["role"] == "user"
         self.messages += prepare_prompt(
-            RECOVERY_PROMPT, {"--RESPONSE--": self.response, "--ERROR--": error_msg}
+            REVISE_PROMPT, {"--RESPONSE--": self.response, "--ERROR--": error_msg}
         )
 
 
-def is_ai_whining(message):
-    """
-    Heuristic: the AI is supposed to return a single SQL query, but if the user tries
-    to make it do something forbidden (e.g. drop database) then it "whines" in English.
-    """
+def is_ai_refusal(message):
+    # heuristic: detect a plain-English response from the AI, contrary to the
+    # instruction for SQL only.
+    # it mainly does this when refusing the user request to do something forbidden
+    # (e.g. drop database)
     message = "\n".join(
         line for line in message.splitlines() if not line.strip().startswith("--")
     )
@@ -255,9 +322,6 @@ def prompt_execute():
 
 # prompt_toolkit
 
-# if output doesn't start with SELECT or WITH then assume it's an english error message.
-
 # some notation to ask general questions about schema
-
 # Classifier: is the user input expressing an intended query or
 # is it a general question about the schema?

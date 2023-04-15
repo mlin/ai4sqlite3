@@ -9,6 +9,7 @@ from copy import deepcopy
 import alive_progress
 import getch
 import openai
+import prompt_toolkit
 from prettytable import PrettyTable
 
 STARTUP_PROMPT = [
@@ -152,11 +153,12 @@ def main(argv=sys.argv):
 
 def main_repl(model, dbc, schema, yes=False, max_revisions=3):
     # main REPL for separate queries until Ctrl+C/Ctrl+D
+    stdin = prompt_toolkit.PromptSession()
     first = True
     try:
         while True:
             # get user intent
-            intent = user_intent(first)
+            intent = user_intent(stdin, first)
             first = False
 
             # prepare to prompt AI for SQL
@@ -246,7 +248,7 @@ def prepare_prompt(template, subs):
     return prompt
 
 
-def user_intent(first=False):
+def user_intent(stdin, first=False):
     # ask user for their query intent
     prompt = (
         "Next query?"
@@ -255,7 +257,7 @@ def user_intent(first=False):
     )
     ans = None
     while not ans:
-        ans = input("\n" + prompt + "\n> ")
+        ans = stdin.prompt("\n" + prompt + "\n> ")
     return ans
 
 
@@ -318,10 +320,3 @@ def prompt_execute():
             return True
         elif user_input.lower() == "n":
             return False
-
-
-# prompt_toolkit
-
-# some notation to ask general questions about schema
-# Classifier: is the user input expressing an intended query or
-# is it a general question about the schema?

@@ -12,7 +12,8 @@ dependencies = [
   "openai",
   "alive_progress",
   "getch",
-  "prettytable"
+  "prettytable",
+  "prompt-toolkit"
 ]
 requires-python = "~=3.8"
 urls = { repository = "https://github.com/mlin/sqlite3ai.git" }

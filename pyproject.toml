@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "sqlite3ai"
+name = "ai4sqlite3"
 description = "LLM query assistant for SQLite3 databases"
 dynamic = ["version"]
 readme = "./README.md"
@@ -16,12 +16,12 @@ dependencies = [
   "prompt-toolkit"
 ]
 requires-python = "~=3.8"
-urls = { repository = "https://github.com/mlin/sqlite3ai.git" }
+urls = { repository = "https://github.com/mlin/ai4sqlite3.git" }
 classifiers = ["License :: OSI Approved :: MIT License"]
 
 
 [project.scripts]
-sqlite3ai = "sqlite3ai:main"
+ai4sqlite3 = "ai4sqlite3:main"
 
 
 [project.optional-dependencies]
@@ -37,11 +37,11 @@ dev = [
 
 
 [tool.setuptools_scm]
-write_to = "sqlite3ai/_version.py"
+write_to = "ai4sqlite3/_version.py"
 
 
 [tool.setuptools.dynamic]
-version = {attr = "sqlite3ai._version.__version__"}
+version = {attr = "ai4sqlite3._version.__version__"}
 
 
 [tool.ruff]

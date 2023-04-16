@@ -8,7 +8,7 @@ The tool sends your database *schema* and written query intentions to OpenAI. Bu
 ### Quick start
 
 <pre>
-$ <b>export OPENAPI_API_KEY=xxx</b>
+$ <b>export OPENAI_API_KEY=xxx</b>
 $ <b>pip3 install ai4sqlite3</b>
 $ <b>wget https://github.com/lerocha/chinook-database/raw/master/ChinookDatabase/DataSources/Chinook_Sqlite.sqlite</b>
 $ <b>ai4sqlite3 Chinook_Sqlite.sqlite --yes</b>
@@ -74,9 +74,10 @@ Next query?
 
 * We reset the AI memory between `Next query?` prompts, so you can't implicitly refer back to prior queries.
 * But you can use the up arrow key to recall a prior input to edit or add to.
+* Remember the AI knows your database *schema* but not *contents*, so e.g. if you want to filter the `Country` column then you should be specific (or lucky) about whether it's populated with `US`, `USA`, `United States`, etc.
 * If SQLite rejects the AI's SQL, then we automatically request corrections (up to `--revisions` attempts).
 * You can (usually) get general questions aswered with something like: *about the schema, what does each invoice line item refer to?*
-* You might enjoy exploring your [Firefox](https://www.foxtonforensics.com/browser-history-examiner/firefox-history-location) or [Chrome](https://www.foxtonforensics.com/browser-history-examiner/chrome-history-location) browser history database (you might need to copy the file if your browser has it open).
+* You might enjoy exploring your [Firefox](https://www.foxtonforensics.com/browser-history-examiner/firefox-history-location) or [Chrome](https://www.foxtonforensics.com/browser-history-examiner/chrome-history-location) history database (you might need to copy the file if your browser has it open).
 
 ### Challenging examples
 

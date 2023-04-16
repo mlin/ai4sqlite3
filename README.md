@@ -83,7 +83,7 @@ Next query?
 
 ### Challenging examples
 
-Here are a few examples where gpt-3.5-turbo usually generates erroneous answers (but we show cherry-picked ones).
+Here are a few examples where gpt-3.5-turbo usually generates erroneous answers (but we cherry-picked good ones). It would take a competent human analyst some time to write these queries too.
 
 <pre>
 > <b>Considering sales to USA customers, find the top-grossing artist in each state.</b>

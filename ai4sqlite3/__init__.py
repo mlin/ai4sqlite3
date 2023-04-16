@@ -113,7 +113,8 @@ def main(argv=sys.argv):
     openai.api_key = api_key
 
     parser = argparse.ArgumentParser(
-        description="LLM assistant for querying SQLite3 database"
+        prog="ai4sqlite3",
+        description="Natural language query assistant for SQLite databases",
     )
     parser.add_argument("dbfn", type=str, help="SQLite3 database filename")
     parser.add_argument(

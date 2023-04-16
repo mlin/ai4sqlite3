@@ -1,11 +1,13 @@
 # ai4sqlite3
 **Natural language query assistant for [SQLite databases](https://www.sqlite.org/index.html)**
 
-Using a local SQLite3 database file, the command-line interface asks for your query intentions, uses OpenAI's ChatGPT API to formulate SQL fulfilling them, and then runs the SQL on your database. Bring your own [OpenAI API key](https://www.howtogeek.com/885918/how-to-get-an-openai-api-key/) ($ / free trial).
+Using any local SQLite3 database file, the command-line interface asks for your query intentions, uses OpenAI's ChatGPT API to formulate SQL fulfilling them, and then runs the SQL on your database. Bring your own [OpenAI API key](https://www.howtogeek.com/885918/how-to-get-an-openai-api-key/) ($ / free trial).
 
 The tool sends your database *schema* and written query intentions to OpenAI. But NOT the result sets nor any other database *content*. The database is opened in read-only mode so that the AI cannot damage it.
 
 ### Quick start
+
+We'll use the [Chinook database](https://github.com/lerocha/chinook-database) as a small starting example.
 
 <pre>
 $ <b>export OPENAI_API_KEY=xxx</b>
@@ -74,7 +76,7 @@ Next query?
 
 * We reset the AI memory between `Next query?` prompts, so you can't implicitly refer back to prior queries.
 * But you can use the up arrow key to recall a prior input to edit or add to.
-* Remember the AI knows your database *schema* but not *contents*
+* Remember the AI knows your database *schema* but not *contents*.
   * e.g. if you want to filter the `Country` column then you should be specific (or lucky) about whether it's populated with `US`, `USA`, `United States`, etc.
   * it's great at text/SQL pidgin: *top 10 customers by revenue, last || ', ' || first where Country = 'USA'*
 * If SQLite rejects the AI's SQL, then we automatically request corrections (up to `--revisions` attempts).
@@ -83,7 +85,7 @@ Next query?
 
 ### Challenging examples
 
-Here are a few examples where gpt-3.5-turbo usually generates erroneous answers (but we cherry-picked good ones). It would take a competent human analyst some time to write these queries too.
+Here are a few examples where gpt-3.5-turbo usually generates erroneous answers (but we cherry-picked good ones). Competent human analysts would need several tries to get these right too.
 
 <pre>
 > <b>Considering sales to USA customers, find the top-grossing artist in each state.</b>

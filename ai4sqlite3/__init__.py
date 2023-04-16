@@ -123,6 +123,12 @@ def main(argv=sys.argv):
         help="Skip confirmation before executing AI's SQL",
     )
     parser.add_argument(
+        "--no-intro",
+        action="store_false",
+        dest="intro",
+        help="Skip introductory schema summary",
+    )
+    parser.add_argument(
         "-m",
         "--model",
         type=str,
@@ -144,7 +150,8 @@ def main(argv=sys.argv):
     with sqlite3.connect(f"file:{args.dbfn}?mode=ro", uri=True) as dbc:
         # read & describe schema
         schema = read_schema(dbc)
-        describe_schema(args.model, args.dbfn, schema)
+        if args.intro:
+            describe_schema(args.model, args.dbfn, schema)
 
         # enter main REPL
         return main_repl(

@@ -4,6 +4,7 @@ import re
 import sqlite3
 import sys
 import textwrap
+from collections import Counter
 from copy import deepcopy
 
 import alive_progress
@@ -41,8 +42,8 @@ MAIN_PROMPT = [
             You will assist the user in writing an SQL query for a specific SQLite3
             database schema.
             Your answers will be directly input to sqlite3_prepare_v2(), so must
-            consist of SQL with no surrounding text, using only syntax and functions
-            supported by SQLite3.
+            consist of semicolon-terminated SQL with no surrounding text, using only
+            syntax and function supported by SQLite3.
             If you cannot fulfill the user's intention for any reason, then provide a
             brief text explanation, without apology or other extraneous chatter.
             Importantly, your SQL must never add, overwrite, alter, or delete anything
@@ -54,12 +55,10 @@ MAIN_PROMPT = [
         "content": """
             Assist me writing an SQL query for my SQLite3 database.
             I will input your responses directly into SQLite3, so I require each
-            response to consist of one SQL query, with no surrounding text, using only
-            syntax and functions supported by SQLite3.
+            response to consist of one semicolon-terminated SQL query, with no
+            surrounding text, using only syntax and functions supported by SQLite3.
             If a query is expected to yield multiple result rows, then set limit 25
             unless I clearly request otherwise.
-            You may include short SQL inline comment lines starting with -- to give me
-            brief hints, but only about tricky or unusual parts.
             You may use common table expressions if they make the SQL much easier for
             me to understand.
             Due to the risk of infinite loop, don't use a recursive CTE unless
@@ -94,8 +93,8 @@ REVISE_PROMPT = [
         "content": """
             Revise your SQL to fix this error: --ERROR--
 
-            Output format: one SQL query with no surrounding text, using only SQL
-            syntax and functions supported by SQLite3.
+            Output format: one semicolon-terminated SQL query with no surrounding text,
+            using only SQL syntax and functions supported by SQLite3.
             Do not apologize or add any other extraneous chatter.
         """,
     },
@@ -180,23 +179,19 @@ def main_repl(model, dbc, schema, yes=False, max_revisions=3):
                     else f"Regenerating SQL (attempt {attempts}/{max_revisions})"
                 ):
                     # generate AI SQL
-                    ai_sql = sql_prompt.fetch()
-                if is_text_answer(ai_sql):
-                    print("\n" + textwrap.fill(ai_sql, width=88))
+                    got_sql, response = sql_prompt.fetch()
+                if not got_sql:
+                    print("\n" + textwrap.fill(response, width=88))
                     break
 
-                print("\n" + ai_sql + "\n")
+                print("\n" + response + "\n")
                 if yes or prompt_execute():
                     try:
                         with spinner("Executing query"):
                             # Execute query & populate results table
                             cursor = dbc.cursor()
-                            cursor.execute(ai_sql)
-                            table = PrettyTable(
-                                [description[0] for description in cursor.description]
-                            )
-                            for row in cursor.fetchall():
-                                table.add_row(row)
+                            cursor.execute(response)
+                            table = results_table(cursor)
                     except (sqlite3.OperationalError, sqlite3.Warning) as exc:
                         # feed error back to AI for revision
                         msg = str(exc)
@@ -277,17 +272,20 @@ class SQLPrompt:
         assert self.messages
 
     def fetch(self):
-        response = openai.ChatCompletion.create(
+        envelope = openai.ChatCompletion.create(
             model=self.model, messages=self.messages
         )
-        self.response = response.choices[0].message.content.strip()
-        # recover a couple of cases where the AI puts junk before/after the SQL,
-        # contrary to repeated instructions!
-        if sql := extract_md_code_block(self.response):
-            return sql
-        if sql := extract_sql_with_preamble(self.response):
-            return sql
-        return self.response
+        self.response = envelope.choices[0].message.content.strip()
+        # Despite our repeated instructions, the AI sometimes gabs before and/or after
+        # the SQL. Good-enough regexp to ignore that:
+        matches = re.findall(
+            r"(?:[\n:`]|^)\s*((?:select|with)\b.*;)",
+            self.response,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if matches:
+            return True, max(matches, key=len)
+        return False, self.response
 
     def revise(self, error_msg):
         # prepare prompt to revise the previous response given error_msg.
@@ -300,44 +298,39 @@ class SQLPrompt:
         )
 
 
-def extract_md_code_block(text):
-    try:
-        p1 = text.index("```")
-        p2 = text.rindex("```")
-        if p2 <= p1 + 3:
-            return None
-        return text[(p1 + 3) : p2].strip()
-    except ValueError:
-        return None
-
-
-def extract_sql_with_preamble(text):
-    try:
-        text = text[(text.index(":") + 1) :].lstrip()
-        if text.upper().startswith("SELECT") or text.upper().startswith("WITH"):
-            return text.strip()
-        return None
-    except ValueError:
-        return None
-
-
-def is_text_answer(message):
-    # heuristic: detect a plain-English response from the AI, which it may provide in
-    # refusing an inappropriate request, or if the user clearly asked a general
-    # question.
-    message = "\n".join(
-        line for line in message.splitlines() if not line.strip().startswith("--")
-    )
-    message = message.upper().strip()
-    return not (message.startswith("SELECT") or message.startswith("WITH"))
-
-
 def prompt_execute():
     while True:
-        print("\nEXECUTE?\n(Y/N) > ", end="", flush=True)
+        print("EXECUTE?\n(Y/N) > ", end="", flush=True)
         user_input = getch.getch()
         print()
         if user_input.lower() == "y":
             return True
         elif user_input.lower() == "n":
             return False
+
+
+def results_table(cursor):
+    # SQLite result column names may not be unique, but PrettyTable needs them to be
+    columns = make_unique([description[0] for description in cursor.description])
+    table = PrettyTable(columns)
+    for row in cursor.fetchall():
+        table.add_row(row)
+    return table
+
+
+def make_unique(lst):
+    count_dict = Counter(lst)
+    unique_count = {}
+    result = []
+
+    for item in lst:
+        if count_dict[item] > 1:
+            if item in unique_count:
+                unique_count[item] += 1
+            else:
+                unique_count[item] = 1
+            result.append(f"{item}{unique_count[item]}")
+        else:
+            result.append(item)
+
+    return result

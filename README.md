@@ -1,7 +1,7 @@
 # ai4sqlite3
-**Natural language query assistant for SQLite3 databases**
+**Natural language query assistant for [SQLite databases](https://www.sqlite.org/index.html)**
 
-Using a local SQLite3 database file, the command-line interface asks for your query intentions, uses OpenAI's ChatGPT API to formulate SQL fulfilling them, and then runs the query. Bring your own [OpenAI API key](https://www.howtogeek.com/885918/how-to-get-an-openai-api-key/) ($ / free trial).
+Using a local SQLite3 database file, the command-line interface asks for your query intentions, uses OpenAI's ChatGPT API to formulate SQL fulfilling them, and then runs the SQL on your database. Bring your own [OpenAI API key](https://www.howtogeek.com/885918/how-to-get-an-openai-api-key/) ($ / free trial).
 
 The tool sends your database *schema* and written query intentions to OpenAI. But NOT the result sets nor any other database *content*. The database is opened in read-only mode so that the AI cannot damage it.
 
@@ -25,29 +25,19 @@ artist, or all invoices associated with a particular customer.
 Please state the nature of the desired database query.
 > <b>top five customer countries by revenue in 2011</b>
 
-Generating SQL in 8.1s 
+Generating SQL in 2.9s 
 
-WITH invoice_2011 AS (
-    SELECT
-        I.InvoiceId,
-        I.Total,
-        strftime('%Y', I.InvoiceDate) AS Year,
-        C.Country
-    FROM Invoice I
-    JOIN Customer C ON I.CustomerId = C.CustomerId
-    WHERE Year = '2011'
-)
-SELECT 
-    Country,
-    SUM(Total) AS Revenue
-FROM invoice_2011
-GROUP BY Country
-ORDER BY Revenue DESC
+SELECT c.Country, SUM(i.Total)
+FROM Customer c
+JOIN Invoice i ON c.CustomerId = i.CustomerId
+WHERE i.InvoiceDate BETWEEN '2011-01-01' AND '2011-12-31'
+GROUP BY c.Country
+ORDER BY SUM(i.Total) DESC
 LIMIT 5;
 
 Executing query in 0.1s 
 +---------+--------------------+
-| Country |      Revenue       |
+| Country |    SUM(i.Total)    |
 +---------+--------------------+
 |   USA   | 103.00999999999999 |
 |  Canada |       55.44        |
@@ -62,16 +52,15 @@ Next query?
 
 ### Advice
 
-* There AI has no memory between `Next query?` prompts; you can't implicitly refer back to prior queries.
-* But you can use the up arrow key to bring up a prior input and edit or add to it.
-* If SQLite rejects the AI's SQL, the tool automatically feeds the error message back and requests corrections, up to `--revisions` attempts.
-* A few non-obvious incantations:
-  * *Complex query of your choice. Include explanatory SQL comment lines.*
-  * *general question: is each invoice line item a track, album, or either?*
+* We reset the AI memory between `Next query?` prompts, so you can't implicitly refer back to prior queries.
+* But you can use the up arrow key to recall a prior input to edit or add to.
+* If SQLite rejects the AI's SQL, then we automatically request corrections (up to `--revisions` attempts).
+* You can (usually) get general questions aswered with something like: *about the schema, what does each invoice line item refer to?*
+* You might enjoy exploring your [Firefox](https://www.foxtonforensics.com/browser-history-examiner/firefox-history-location) or [Chrome](https://www.foxtonforensics.com/browser-history-examiner/chrome-history-location) browser history database (you might need to copy the file if your browser has it open).
 
 ### Challenging examples
 
-Here are a few examples where gpt-3.5-turbo generates diverse and frequently-erroneous answers (cherry-picked ones shown).
+Here are a few examples where gpt-3.5-turbo generates diverse, often-erroneous answers (cherry-picked ones shown).
 
 <pre>
 > <b>Considering sales to USA customers, find the top-grossing artist in each state.</b>

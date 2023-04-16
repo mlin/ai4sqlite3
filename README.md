@@ -12,15 +12,15 @@ $ <b>export OPENAPI_API_KEY=xxx</b>
 $ <b>pip3 install ai4sqlite3</b>
 $ <b>wget https://github.com/lerocha/chinook-database/raw/master/ChinookDatabase/DataSources/Chinook_Sqlite.sqlite</b>
 $ <b>ai4sqlite3 Chinook_Sqlite.sqlite --yes</b>
-Analyzing schema of Chinook_Sqlite.sqlite in 5.2s 
+Analyzing schema of Chinook_Sqlite.sqlite in 4.9s 
 
-The overall purpose of this SQLite3 database appears to be a music store, with tables
-for artists, albums, tracks, genres, media types, playlists, and customers. The tables
-are related through various foreign key constraints, such as the ArtistId in the Album
-table referencing the ArtistId in the Artist table, or the SupportRepId in the Customer
-table referencing the EmployeeId in the Employee table. These relationships allow for
-data to be combined and queried in useful ways, such as finding all tracks by a specific
-artist, or all invoices associated with a particular customer.
+This database models a digital music store. It includes tables for artists, albums,
+tracks, genres, media types, invoices, customers, employees, playlists, and playlist
+tracks. The tables are linked through foreign keys to form relationships, such as an
+artist being associated with an album, an invoice being linked to a customer, and a
+playlist being composed of multiple tracks. The database is designed to enable the store
+to manage and track music sales, customer information, and employee records, as well as
+organizing and categorizing the available music.
 
 Please state the nature of the desired database query.
 > <b>top five customer countries by revenue in 2011</b>

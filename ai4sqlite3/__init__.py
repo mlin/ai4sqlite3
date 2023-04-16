@@ -27,7 +27,7 @@ STARTUP_PROMPT = [
         "role": "user",
         "content": """
             Guess the overall purpose of this database, and briefly summarize the
-            tables and their relationships, in about 100 words total.
+            tables and the concepts they model, in about 100 words total.
         """,
     },
 ]

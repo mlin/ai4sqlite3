@@ -74,7 +74,9 @@ Next query?
 
 * We reset the AI memory between `Next query?` prompts, so you can't implicitly refer back to prior queries.
 * But you can use the up arrow key to recall a prior input to edit or add to.
-* Remember the AI knows your database *schema* but not *contents*, so e.g. if you want to filter the `Country` column then you should be specific (or lucky) about whether it's populated with `US`, `USA`, `United States`, etc.
+* Remember the AI knows your database *schema* but not *contents*
+  * e.g. if you want to filter the `Country` column then you should be specific (or lucky) about whether it's populated with `US`, `USA`, `United States`, etc.
+  * it's great at text/SQL pidgin: *top 10 customers by revenue, last || ', ' || first where Country = 'USA'*
 * If SQLite rejects the AI's SQL, then we automatically request corrections (up to `--revisions` attempts).
 * You can (usually) get general questions aswered with something like: *about the schema, what does each invoice line item refer to?*
 * You might enjoy exploring your [Firefox](https://www.foxtonforensics.com/browser-history-examiner/firefox-history-location) or [Chrome](https://www.foxtonforensics.com/browser-history-examiner/chrome-history-location) history database (you might need to copy the file if your browser has it open).

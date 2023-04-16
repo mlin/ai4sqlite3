@@ -23,31 +23,51 @@ to manage and track music sales, customer information, and employee records, as 
 organizing and categorizing the available music.
 
 Please state the nature of the desired database query.
-> <b>top five customer countries by revenue in 2011</b>
+> <b>top five customer countries by 2011 revenue (round to cents)</b>
 
-Generating SQL in 2.9s 
+Generating SQL in 2.8s 
 
-SELECT c.Country, SUM(i.Total)
+SELECT c.Country, ROUND(SUM(i.Total), 2) AS 'Revenue 2011'
 FROM Customer c
 JOIN Invoice i ON c.CustomerId = i.CustomerId
-WHERE i.InvoiceDate BETWEEN '2011-01-01' AND '2011-12-31'
+WHERE strftime('%Y', i.InvoiceDate) = '2011'
 GROUP BY c.Country
 ORDER BY SUM(i.Total) DESC
 LIMIT 5;
 
 Executing query in 0.1s 
-+---------+--------------------+
-| Country |    SUM(i.Total)    |
-+---------+--------------------+
-|   USA   | 103.00999999999999 |
-|  Canada |       55.44        |
-| Germany |       48.57        |
-|  France |       42.61        |
-| Ireland |       32.75        |
-+---------+--------------------+
++---------+--------------+
+| Country | Revenue 2011 |
++---------+--------------+
+|   USA   |    103.01    |
+|  Canada |    55.44     |
+| Germany |    48.57     |
+|  France |    42.61     |
+| Ireland |    32.75     |
++---------+--------------+
 
 Next query?
-> 
+> <b>percentage of all revenue from sales to North American customers</b>
+
+Generating SQL in 3.3s 
+
+SELECT 
+    ROUND(SUM(i.Total) / (SELECT SUM(Total) FROM Invoice)*100, 2) AS "North American Revenue Percentage"
+FROM 
+    Invoice i
+    INNER JOIN Customer c ON i.CustomerId = c.CustomerId
+WHERE 
+    c.Country = 'USA' OR c.Country = 'Canada';
+
+Executing query in 0.1s 
++-----------------------------------+
+| North American Revenue Percentage |
++-----------------------------------+
+|               35.52               |
++-----------------------------------+
+
+Next query?
+>
 </pre>
 
 ### Advice
@@ -60,7 +80,7 @@ Next query?
 
 ### Challenging examples
 
-Here are a few examples where gpt-3.5-turbo generates diverse, often-erroneous answers (cherry-picked ones shown).
+Here are a few examples where gpt-3.5-turbo usually generates erroneous answers (but we show cherry-picked ones).
 
 <pre>
 > <b>Considering sales to USA customers, find the top-grossing artist in each state.</b>

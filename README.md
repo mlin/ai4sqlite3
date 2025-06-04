@@ -85,7 +85,7 @@ Next query?
 
 ### Challenging examples
 
-Here are a few examples where gpt-3.5-turbo usually generates erroneous answers (but we cherry-picked good ones). Competent human analysts would need several tries to get these right too.
+Here are a few examples where older models like gpt-3.5-turbo often generated erroneous answers (we cherry-picked good ones). Newer models such as `o4-mini` generally perform better, though complex requests can still take a few tries.
 
 <pre>
 > <b>Considering sales to USA customers, find the top-grossing artist in each state.</b>

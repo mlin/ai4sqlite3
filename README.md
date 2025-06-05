@@ -83,62 +83,46 @@ Next query?
 * You can (usually) get general questions aswered with something like: *about the schema, what does each invoice line item refer to?*
 * You might enjoy exploring your [Firefox](https://www.foxtonforensics.com/browser-history-examiner/firefox-history-location) or [Chrome](https://www.foxtonforensics.com/browser-history-examiner/chrome-history-location) history database (you might need to copy the file if your browser has it open).
 
-### Challenging examples
-
-Here are a few examples where older models like gpt-3.5-turbo often generated erroneous answers (we cherry-picked good ones). Newer models such as `o4-mini` generally perform better, though complex requests can still take a few tries.
+### More-challenging examples
 
 <pre>
 > <b>Considering sales to USA customers, find the top-grossing artist in each state.</b>
 
 Generating SQL in 13.4s 
 
-WITH 
-    -- Select only the sales to USA customers and
-    -- join the necessary tables.
-    usa_sales AS (
-        SELECT il.*, c.State
-        FROM InvoiceLine il
-        INNER JOIN Invoice i ON il.InvoiceId=i.InvoiceId
-        INNER JOIN Customer c ON i.CustomerId=c.CustomerId
-        WHERE c.Country='USA'
-    ),
- 
-    -- Calculate the total sale in dollars for each artist.
-    artist_total_sales AS (
-        SELECT ar.Name, SUM(usa_sales.UnitPrice*usa_sales.Quantity) AS total_sales
-        FROM usa_sales
-        INNER JOIN Track t ON usa_sales.TrackId=t.TrackId
-        INNER JOIN Album al ON t.AlbumId=al.AlbumId
-        INNER JOIN Artist ar ON al.ArtistId=ar.ArtistId
-        GROUP BY ar.ArtistId
-    ),
- 
-    -- Rank the artists by total sale in each state.
-    -- If two or more artists share the top sale in a state,
-    -- rank them alphabetically by artist name.
-    ranked_artists AS (
-        SELECT ar.Name, usa_sales.State,
-               SUM(usa_sales.UnitPrice*usa_sales.Quantity) AS state_sales,
-               RANK() OVER (
-                    PARTITION BY usa_sales.State 
-                    ORDER BY SUM(usa_sales.UnitPrice*usa_sales.Quantity) DESC, ar.Name
-               ) AS rank_num
-        FROM usa_sales
-        INNER JOIN Track t ON usa_sales.TrackId=t.TrackId
-        INNER JOIN Album al ON t.AlbumId=al.AlbumId
-        INNER JOIN Artist ar ON al.ArtistId=ar.ArtistId
-        GROUP BY ar.ArtistId, usa_sales.State
-    )
- 
--- Select only the top-ranked artist in each state.
-SELECT State, Name AS Top_Grossing_Artist
-FROM ranked_artists
-WHERE rank_num=1
-ORDER BY State;
+WITH StateArtistSales AS (
+  SELECT
+    i.BillingState AS State,
+    ar.ArtistId,
+    ar.Name AS ArtistName,
+    SUM(il.UnitPrice * il.Quantity) AS TotalSales
+  FROM Invoice i
+  JOIN InvoiceLine il ON il.InvoiceId = i.InvoiceId
+  JOIN Track t ON il.TrackId = t.TrackId
+  JOIN Album al ON t.AlbumId = al.AlbumId
+  JOIN Artist ar ON al.ArtistId = ar.ArtistId
+  WHERE i.BillingCountry = 'USA'
+  GROUP BY i.BillingState, ar.ArtistId
+),
+MaxSales AS (
+  SELECT
+    State,
+    MAX(TotalSales) AS MaxTotalSales
+  FROM StateArtistSales
+  GROUP BY State
+)
+SELECT
+  s.State,
+  s.ArtistName
+FROM StateArtistSales s
+JOIN MaxSales m
+  ON s.State = m.State
+ AND s.TotalSales = m.MaxTotalSales
+ORDER BY s.State;
 
 Executing query in 0.1s 
 +-------+--------------------------------+
-| State |      Top_Grossing_Artist       |
+| State |          ArtistName            |
 +-------+--------------------------------+
 |   AZ  |          Iron Maiden           |
 |   CA  |          Iron Maiden           |

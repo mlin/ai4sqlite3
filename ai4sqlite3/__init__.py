@@ -33,8 +33,8 @@ STARTUP_PROMPT = [
 ]
 
 MAIN_PROMPT = [
-    # NOTE: per https://platform.openai.com/docs/guides/chat/introduction gpt-3.5-turbo
-    # doesn't pay enough attention to directives in the system message, so we put more
+    # NOTE: prior models didn't pay enough attention to directives in the system
+    # message, so we put more
     # into the first user message.
     {
         "role": "system",
@@ -110,7 +110,7 @@ def main(argv=sys.argv):
             file=sys.stderr,
         )
         return 1
-    openai.api_key = api_key
+    client = openai.OpenAI(api_key=api_key)
 
     parser = argparse.ArgumentParser(
         prog="ai4sqlite3",
@@ -133,7 +133,7 @@ def main(argv=sys.argv):
         "-m",
         "--model",
         type=str,
-        default="gpt-3.5-turbo",
+        default="o4-mini",
         help="OpenAI /v1/chat/completions model; see "
         "https://platform.openai.com/docs/models/model-endpoint-compatibility",
     )
@@ -152,15 +152,20 @@ def main(argv=sys.argv):
         # read & describe schema
         schema = read_schema(dbc)
         if args.intro:
-            describe_schema(args.model, args.dbfn, schema)
+            describe_schema(client, args.model, args.dbfn, schema)
 
         # enter main REPL
         return main_repl(
-            args.model, dbc, schema, yes=args.yes, max_revisions=args.revisions
+            client,
+            args.model,
+            dbc,
+            schema,
+            yes=args.yes,
+            max_revisions=args.revisions,
         )
 
 
-def main_repl(model, dbc, schema, yes=False, max_revisions=3):
+def main_repl(client, model, dbc, schema, yes=False, max_revisions=3):
     # main REPL for separate queries until Ctrl+C/Ctrl+D
     stdin = prompt_toolkit.PromptSession()
     first = True
@@ -171,7 +176,7 @@ def main_repl(model, dbc, schema, yes=False, max_revisions=3):
             first = False
 
             # prepare to prompt AI for SQL
-            sql_prompt = SQLPrompt(model, schema, intent)
+            sql_prompt = SQLPrompt(client, model, schema, intent)
 
             # generate AI SQL, run it and show result table to user.
             # inner loop: if SQLite rejects the SQL, feed the error message back to AI
@@ -224,11 +229,11 @@ def read_schema(dbc):
     )
 
 
-def describe_schema(model, dbfn, schema):
+def describe_schema(client, model, dbfn, schema):
     # ask AI to summarize the schema, display it to user
     with spinner(f"Analyzing schema of {os.path.basename(dbfn)} "):
         prompt = prepare_prompt(STARTUP_PROMPT, {"--SCHEMA--": schema})
-        response = openai.ChatCompletion.create(model=model, messages=prompt)
+        response = client.chat.completions.create(model=model, messages=prompt)
     desc = response.choices[0].message.content
     print("\n" + textwrap.fill(desc, width=88))
 
@@ -269,7 +274,8 @@ def user_intent(stdin, first=False):
 class SQLPrompt:
     # Manages our AI prompt for SQL given the user intent, including revisions after
     # receiving invalid/erroneous SQL back.
-    def __init__(self, model, schema, intent):
+    def __init__(self, client, model, schema, intent):
+        self.client = client
         self.model = model
         self.schema = schema
         self.intent = intent
@@ -280,7 +286,7 @@ class SQLPrompt:
         assert self.messages
 
     def fetch(self):
-        envelope = openai.ChatCompletion.create(
+        envelope = self.client.chat.completions.create(
             model=self.model, messages=self.messages
         )
         self.response = envelope.choices[0].message.content.strip()
